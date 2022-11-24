@@ -4,15 +4,19 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox"
+	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/auth"
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/files"
 )
 
 type Config struct {
-	Token string `envvar:"TOKEN,required"`
-	Seed  int64  `envvar:"SEED"`
+	Seed         int64  `envvar:"SEED"`
+	AppKey       string `envvar:"APP_KEY"`
+	AppSecret    string `envvar:"APP_SECRET"`
+	RefreshToken string `envvar:"USER_REFRESH_TOKEN"`
 }
 
 type DbPics struct {
@@ -20,31 +24,25 @@ type DbPics struct {
 	fs      files.Client
 	entries []*files.FileMetadata
 	current int
+	lck     sync.Mutex
 }
 
 func New(cfg Config) (*DbPics, error) {
 
-	fs := files.New(dropbox.Config{
-		Token:    cfg.Token,
-		LogLevel: dropbox.LogInfo,
-	})
+	db := DbPics{
+		cfg: cfg,
+	}
 
-	res, err := fs.ListFolder(&files.ListFolderArg{})
+	fs, err := newFileClient(cfg.AppKey, cfg.AppSecret, cfg.RefreshToken)
 	if err != nil {
 		return nil, err
 	}
 
-	db := DbPics{
-		cfg: cfg,
-		fs:  fs,
-	}
+	db.fs = fs
 
-	for _, e := range res.Entries {
-		f, ok := e.(*files.FileMetadata)
-		if !ok {
-			continue
-		}
-		db.entries = append(db.entries, f)
+	db.entries, err = getAllFilesInDirectory(fs)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(db.entries) == 0 {
@@ -56,11 +54,29 @@ func New(cfg Config) (*DbPics, error) {
 	return &db, nil
 }
 
+// Next returns a slice of bytes representing the "next" image.
 func (db *DbPics) Next() ([]byte, error) {
 
-	_, r, err := db.fs.Download(files.NewDownloadArg(db.entries[db.current].PathLower))
+	db.lck.Lock()
+	currentEntry := db.entries[db.current]
+	db.lck.Unlock()
+
+	_, r, err := db.fs.Download(files.NewDownloadArg(currentEntry.PathLower))
 	if err != nil {
-		return nil, err
+		_, ok := err.(*auth.AuthAPIError)
+		if ok {
+			fs, fcerr := newFileClient(db.cfg.AppKey, db.cfg.AppSecret, db.cfg.RefreshToken)
+			if fcerr != nil {
+				return nil, fcerr
+			}
+			db.fs = fs
+			_, r, err = db.fs.Download(files.NewDownloadArg(db.entries[db.current].PathLower))
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
 
 	buf, err := io.ReadAll(r)
@@ -68,6 +84,8 @@ func (db *DbPics) Next() ([]byte, error) {
 		return nil, err
 	}
 
+	db.lck.Lock()
+	defer db.lck.Unlock()
 	db.current++
 	if db.current >= len(db.entries) {
 		db.shuffleEntries()
@@ -96,4 +114,53 @@ func (db *DbPics) shuffleEntries() {
 
 	rand.Shuffle(len(db.entries),
 		func(i, j int) { db.entries[i], db.entries[j] = db.entries[j], db.entries[i] })
+}
+
+// newFileClient uses the refreshToken to get a new accessToken and then uses the accessToken to
+// create a new Dropbox files client.
+func newFileClient(appKey, appSecret, refreshToken string) (files.Client, error) {
+	oat, err := RefreshOfflineAccessToken(appKey, appSecret, refreshToken)
+	if err != nil {
+		return nil, err
+	}
+
+	return files.New(dropbox.Config{
+		Token:    oat.AccessToken,
+		LogLevel: dropbox.LogInfo,
+	}), nil
+}
+
+// getAllFilesInDirectory returns all the FileMetadata associated with files in the path.
+// Depending on the number of files in the directory, it may make several calls to DropBox.
+func getAllFilesInDirectory(fs files.Client) ([]*files.FileMetadata, error) {
+
+	const limit = 250
+	var entries []*files.FileMetadata
+
+	res, err := fs.ListFolder(&files.ListFolderArg{Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+
+	addEntries := func(result *files.ListFolderResult) {
+		for _, e := range result.Entries {
+			f, ok := e.(*files.FileMetadata)
+			if !ok {
+				continue
+			}
+			entries = append(entries, f)
+		}
+	}
+
+	addEntries(res)
+
+	for res.HasMore {
+		res, err = fs.ListFolderContinue(&files.ListFolderContinueArg{Cursor: res.Cursor})
+		if err != nil {
+			return nil, err
+		}
+		addEntries(res)
+	}
+
+	return entries, nil
 }
