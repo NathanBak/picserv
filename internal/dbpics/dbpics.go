@@ -2,13 +2,13 @@ package dbpics
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox"
-	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/auth"
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/files"
 )
 
@@ -63,18 +63,15 @@ func (db *DbPics) Next() ([]byte, error) {
 
 	_, r, err := db.fs.Download(files.NewDownloadArg(currentEntry.PathLower))
 	if err != nil {
-		_, ok := err.(*auth.AuthAPIError)
-		if ok {
-			fs, fcerr := newFileClient(db.cfg.AppKey, db.cfg.AppSecret, db.cfg.RefreshToken)
-			if fcerr != nil {
-				return nil, fcerr
-			}
-			db.fs = fs
-			_, r, err = db.fs.Download(files.NewDownloadArg(db.entries[db.current].PathLower))
-			if err != nil {
-				return nil, err
-			}
-		} else {
+		fmt.Printf("error in dbpics.Next(): %v\nwill try refreshing access token\n", err)
+		fs, fcerr := newFileClient(db.cfg.AppKey, db.cfg.AppSecret, db.cfg.RefreshToken)
+		if fcerr != nil {
+			return nil, fcerr
+		}
+		fmt.Println("access token refreshed")
+		db.fs = fs
+		_, r, err = db.fs.Download(files.NewDownloadArg(db.entries[db.current].PathLower))
+		if err != nil {
 			return nil, err
 		}
 	}
