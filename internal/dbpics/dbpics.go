@@ -1,8 +1,8 @@
 package dbpics
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"io"
 	"math/rand"
 	"sync"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox"
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/files"
+	"golang.org/x/oauth2"
 )
 
 type Config struct {
@@ -63,17 +64,7 @@ func (db *DbPics) Next() ([]byte, error) {
 
 	_, r, err := db.fs.Download(files.NewDownloadArg(currentEntry.PathLower))
 	if err != nil {
-		fmt.Printf("error in dbpics.Next(): %v\nwill try refreshing access token\n", err)
-		fs, fcerr := newFileClient(db.cfg.AppKey, db.cfg.AppSecret, db.cfg.RefreshToken)
-		if fcerr != nil {
-			return nil, fcerr
-		}
-		fmt.Println("access token refreshed")
-		db.fs = fs
-		_, r, err = db.fs.Download(files.NewDownloadArg(db.entries[db.current].PathLower))
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	buf, err := io.ReadAll(r)
@@ -107,23 +98,27 @@ func (db *DbPics) shuffleEntries() {
 	if seed == 0 {
 		seed = time.Now().UnixNano()
 	}
-	rand.Seed(seed)
 
-	rand.Shuffle(len(db.entries),
+	rand.New(rand.NewSource(seed)).Shuffle(len(db.entries),
 		func(i, j int) { db.entries[i], db.entries[j] = db.entries[j], db.entries[i] })
 }
 
-// newFileClient uses the refreshToken to get a new accessToken and then uses the accessToken to
-// create a new Dropbox files client.
+// newFileClient creates a new Dropbox files client using the app credentials and refresh token.
 func newFileClient(appKey, appSecret, refreshToken string) (files.Client, error) {
-	oat, err := RefreshOfflineAccessToken(appKey, appSecret, refreshToken)
-	if err != nil {
-		return nil, err
+	conf := &oauth2.Config{
+		ClientID:     appKey,
+		ClientSecret: appSecret,
+		Endpoint: oauth2.Endpoint{
+			TokenURL: "https://api.dropbox.com/oauth2/token",
+		},
 	}
-
+	ts := conf.TokenSource(context.Background(), &oauth2.Token{
+		RefreshToken: refreshToken,
+		Expiry:       time.Now().Add(-time.Second),
+	})
 	return files.New(dropbox.Config{
-		Token:    oat.AccessToken,
-		LogLevel: dropbox.LogInfo,
+		TokenSource: ts,
+		LogLevel:    dropbox.LogInfo,
 	}), nil
 }
 

@@ -46,7 +46,7 @@ func New(cfg Config) (*Server, error) {
 		Path("/next").
 		Name("Next Pic").
 		HandlerFunc(s.next)
-	s.Server.Handler = router
+	s.Handler = router
 
 	return s, nil
 }
