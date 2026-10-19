@@ -4,7 +4,7 @@ picserv is a picture server written in Go. It connects to a Dropbox folder conta
 
 ## How It Works
 
-On startup, picserv fetches the list of all files in the configured Dropbox folder, shuffles them, and then serves them sequentially. When all images have been served the list is reshuffled and the cycle repeats.
+On startup, picserv fetches the list of all files in the configured Dropbox folder, shuffles them, and then serves them sequentially. When all images have been served, the file list is refreshed from Dropbox and reshuffled before the cycle repeats. If the refresh fails or returns no files, the existing list is reused.
 
 ## Prerequisites
 

@@ -76,6 +76,9 @@ func (db *DbPics) Next() ([]byte, error) {
 	defer db.lck.Unlock()
 	db.current++
 	if db.current >= len(db.entries) {
+		if updated, err := getAllFilesInDirectory(db.fs); err == nil && len(updated) > 0 {
+			db.entries = updated
+		}
 		db.shuffleEntries()
 		db.current = 0
 	}
