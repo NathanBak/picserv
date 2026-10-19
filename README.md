@@ -41,6 +41,26 @@ To obtain a refresh token:
 go run .
 ```
 
+## Docker
+
+### Build
+
+```sh
+docker build -t picserv .
+```
+
+### Run
+
+The image defaults to port `8080` internally. Use `--env-file` to pass credentials and `-e PORT=8080` to ensure the port setting is not overridden by the env file. Adjust the left side of `-p` to map to a different host port.
+
+```sh
+docker run --env-file .env -e PORT=8080 -p 8083:8080 picserv
+```
+
+### Test
+
+With the container running, open a browser and navigate to http://localhost:8083/next to verify the service is working.
+
 ## API
 
 ### `GET /next`
