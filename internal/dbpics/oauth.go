@@ -39,7 +39,7 @@ func GetOfflineAccessToken(appKey, appSecret, userCode string) (OfflineAccessTok
 	if err != nil {
 		return oat, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	buf, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -85,7 +85,7 @@ func RefreshOfflineAccessToken(appKey, appSecret, userRefreshToken string) (Offl
 	if err != nil {
 		return oat, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	buf, err := io.ReadAll(resp.Body)
 	if err != nil {
